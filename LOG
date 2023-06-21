@@ -1,0 +1,131 @@
+2023-06-07
+dalvik-mterp.c
+androidでかつて使われていたDalvikインタプリタ
+https://android.googlesource.com/platform/dalvik.git/+/master/docs/porting-guide.html
+https://wladimir-tm4pda.github.io/porting/dalvik.html
+bytecode.cと同様にシフトと加算を使ってtokenからラベル値を得るので、
+ジャンプテーブルをメモリアクセスしないが、
+token threadingと同様に命令イメージをVM間で共通化できる。
+
+2020-07-25
+tailcall.c
+C言語では末尾呼び出し最適化が保証されておらず、
+最適化条件がコンパイラの版ごとに変わる可能性が有り、
+自分は今までやらなかった。
+しかし
+When pigs fly: optimising bytecode interpreters | by Vladimir Kazanov | badoo_tech
+https://badootech.badoo.com/when-pigs-fly-optimising-bytecode-interpreters-f64fb6bfa20f?gi=6aead5120a27
+がやったので、追加。
+threaded codeもコンパイラの版によって末尾融合でswitch threadingに化けるし。
+x86では関数引数をスタックに積むので、
+ip受け渡しがスタックメモリ経由になり、遅い。
+しかし他の呼び出し規約ならば、direct threading並の速さになるかも。
+
+2017-10-02
+token.c
+token threading codeのベンチマーク。
+http://www.complang.tuwien.ac.at/forth/threading
+に含まれていないのは不思議だ。
+
+2016-11-13
+switch-unre.c
+* bit fieldで値域を限定
+* 全ての値域にcase文を用意
+これらを施すと、gcc-4.9.3は値域範囲チェック用の分岐を省く。
+ただしpiledriverでは、
+単なるswitch threadingはVM命令当たり10クロック食うのに対し、
+switch-unreは8クロック食い、あまり速度が上がらない。
+このベンチマークでは、VM命令の半分は次命令が一種類に限られるので、
+direct threadingだと次命令分岐の半分が無条件分岐として扱われるはず。
+単純な分岐予測器が効かない分岐では、
+piledriverではfetchが2clockではなく4clock以上になるようだ。
+効果が薄いのは、
+switch-unreで減る分岐が実質無条件分岐(値域範囲チェック)だからか。
+
+2016-02-09
+direct-loop.c
+while(1)を使って、C言語コード上ではinner interpreterを一ヶ所にまとめている。
+ところがコンパイル結果では、inner interpreterがインライン展開されて、
+direct.cと同等のバイナリコードが出力される。
+他のthreading手法ではinner interpreterが大きくなるので、上手くいかないかも。
+https://dev.openwrt.org/browser/trunk/package/lua/patches/300-opcode_performance.patch?rev=18136
+を参考にした。
+
+2016-02-07
+nostradamus.c
+http://www.emulators.com/docs/nx25_nostradamus.htm
+の結論部分を実装。
+VM命令列にジャンプが無いと仮定して、
+dispatchループをガード付きでアンローリング。
+call系では最速。
+このベンチのVM命令列はジャンプが少ないので、
+アンローリング数を増やせばもっと速度が出る。
+
+2015-12-31
+call.c
+元ネタのC言語関数呼び出しによるthreading。
+call-eax.c
+call-two.c
+http://www.emulators.com/docs/nx25_nostradamus.htm
+より。
+引数や返り値はレジスタ経由の呼び出し規約が多いので、
+プログラムカウンタを引数・返り値で管理。
+call.cより少し速い。
+どちらも、レジスタ割付ではswitch threadingに劣る。
+しかしswitch.cでは余計な選択肢で最適化が狂うのか、call-???.cの方が速い。
+i386では構造体の返り値はスタック経由なのか、call-two.cはcall.cより遅い。
+
+2015-06-27
+delay.c
+遅延スロットを使うと、VM分岐命令のレイテンシが減るはず。
+
+2015-06-03
+bytecode.cのラベル値復号で、ラベル値と同じ大きさの整数型にキャストすることで、
+型変換命令がアセンブラ段階で出力されるのを抑える。
+
+2015-05-21
+bytecode.c
+シフトと加算を使ってラベル値を1バイトに変換したdirect threading。
+ラベルが2^(ALIGN)バイト境界に整列されていないと、正しく動作しないはず。
+
+2015-05-10
+VM命令列が実質2VM命令になるようにindirect.cを書き換えたところ、
+ジャンプ命令の限界である2クロック/VM命令で回った。
+ところが、デコードされるx86命令数は9個なので、
+VM命令2個を処理するのに3クロック必要となる。
+ジャンプ命令でデコーダをリセットするのに1クロックかかるとすると、
+VM命令2個処理するのに(3+2)クロックかかるはずだが、実際は4クロックで済む。
+つまりpiledriverでは、
+ジャンプ命令によるデコーダリセットは0クロック(デコードと並行動作)であり、
+1クロック遅延するのは32バイトブロックの読み出しだけということか。
+
+ちなみに、VM命令列の長さを変えない代わりにVM命令の種類を2種類に減らすと、
+速度が落ちた。
+単純な予測器の正解率が上がったため、他の予測器が無視されたのか?
+retなどの無条件ジャンプを除き、分岐予測は予測不能だ。
+
+2015-05-09
+2015-05-05の参考ベンチマークのMakefileを参考に
+-fno-reorder-blocks
+を追加すると、-O3でのswitchの速度が上がり、-O1まであと少しに迫った。
+direct.cの速度がindirect.cより遅い場合は、
+-falign-labels=16や32で改善できるようだ。
+align-labelsでswitchの速度も上がる。
+align-labelsとno-reorder-blocksを同時に指定するとswitchはひどく遅くなる。
+
+2015-05-08
+-march=nativeにしたら、switchの速度が上がった。
+アセンブリ出力を比較すると、
+"--"(1減算)命令とパディングの大きさしか違いがなかった。
+依然、-O1の方が速い。
+
+2015-05-05
+Speed of various interpreter dispatch techniques V2
+http://www.complang.tuwien.ac.at/forth/threading
+を参考に作成したベンチマーク。
+Makefile - -O3最適化を有効に、など。
+subroutine.c - インライン化されないよう、x86用アセンブラを使用。
+load_store.c - load_store_forwardingの効果を調べるもの。
+残り - 参考ベンチマークからそのまま拝借。
+
+switchについては、命令の並べ替えに問題があるのか、-O1より-O3の方が遅い。
