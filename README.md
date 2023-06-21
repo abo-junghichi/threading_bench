@@ -10,5 +10,7 @@
 
 ## 使い方
 i386アーキテクチャをサポートするUNIX系OS上でGNU makeを用意してから
-    $ make bench
+
+	$ make bench
+
 でベンチマークを実行。
